@@ -27,15 +27,8 @@ from tenant_schemas.utils import tenant_context
 
 from api.models import Provider, ProviderAuthentication, ProviderBillingSource
 from api.report.test.ocp.helpers import OCPReportDataGenerator
-from api.report.test.tests_queries import FakeAWSCostData
+from api.report.test.aws.helpers import AWSReportDataGenerator
 from api.utils import DateHelper
-from reporting.models import (AWSAccountAlias,
-                              AWSCostEntry,
-                              AWSCostEntryBill,
-                              AWSCostEntryLineItem,
-                              AWSCostEntryLineItemDaily,
-                              AWSCostEntryPricing,
-                              AWSCostEntryProduct)
 from reporting.models import (OCPAWSCostLineItemDailySummary,
                               OCPAWSCostLineItemProjectDailySummary)
 
@@ -52,7 +45,7 @@ class OCPAWSReportDataGenerator(OCPReportDataGenerator):
         aws_usage_start = min(self.report_ranges[0])
         aws_usage_end = max(self.report_ranges[0])
 
-        self.aws_info = FakeAWSCostData(usage_start=aws_usage_start,
+        self.aws_info = AWSReportDataGenerator(usage_start=aws_usage_start,
                                         usage_end=aws_usage_end,
                                         resource_id=self.resource_id)
         self._tags = self._generate_tags()
@@ -121,104 +114,12 @@ class OCPAWSReportDataGenerator(OCPReportDataGenerator):
 
     def add_aws_data_to_tenant(self, product='ec2'):
         """Populate tenant with AWS data."""
-        with tenant_context(self.tenant):
-            # get or create alias
-            AWSAccountAlias.objects.get_or_create(
-                account_id=self.aws_info.account_id,
-                account_alias=self.aws_info.account_alias)
-
-            # create bill
-            bill, _ = AWSCostEntryBill.objects.get_or_create(**self.aws_info.bill)
-
-            # create ec2 product
-            product_data = self.aws_info.product(product)
-            ce_product, _ = AWSCostEntryProduct.objects.get_or_create(**product_data)
-
-            # create pricing
-            ce_pricing, _ = AWSCostEntryPricing.objects.get_or_create(**self.aws_info.pricing)
-
-            # add hourly data
-            data_start = self.aws_info.usage_start
-            data_end = self.aws_info.usage_end
-            current = data_start
-
-            while current < data_end:
-                end_hour = current + DateHelper().one_hour
-
-                # generate copy of data with 1 hour usage range.
-                curr_data = copy.deepcopy(self.aws_info)
-                curr_data.usage_end = end_hour
-                curr_data.usage_start = current
-
-                # keep line items within the same AZ
-                curr_data.availability_zone = self.aws_info.availability_zone
-
-                # get or create cost entry
-                cost_entry_data = curr_data.cost_entry
-                cost_entry_data.update({'bill': bill})
-                cost_entry, _ = AWSCostEntry.objects.get_or_create(**cost_entry_data)
-
-                # create line item
-                line_item_data = curr_data.line_item(product)
-                model_instances = {'cost_entry': cost_entry,
-                                   'cost_entry_bill': bill,
-                                   'cost_entry_product': ce_product,
-                                   'cost_entry_pricing': ce_pricing}
-                line_item_data.update(model_instances)
-
-                line_item, _ = AWSCostEntryLineItem.objects.get_or_create(**line_item_data)
-
-                current = end_hour
-
-            self._populate_aws_daily_table()
-
-    def _populate_aws_daily_table(self):
-        included_fields = [
-            'cost_entry_product_id',
-            'cost_entry_pricing_id',
-            'cost_entry_reservation_id',
-            'line_item_type',
-            'usage_account_id',
-            'usage_type',
-            'operation',
-            'availability_zone',
-            'resource_id',
-            'tax_type',
-            'product_code',
-            'tags'
-        ]
-        annotations = {
-            'usage_start': Cast('usage_start', DateTimeField()),
-            'usage_end': Cast('usage_start', DateTimeField()),
-            'usage_amount': Sum('usage_amount'),
-            'normalization_factor': Max('normalization_factor'),
-            'normalized_usage_amount': Sum('normalized_usage_amount'),
-            'currency_code': Max('currency_code'),
-            'unblended_rate': Max('unblended_rate'),
-            'unblended_cost': Sum('unblended_cost'),
-            'blended_rate': Max('blended_rate'),
-            'blended_cost': Sum('blended_cost'),
-            'public_on_demand_cost': Sum('public_on_demand_cost'),
-            'public_on_demand_rate': Max('public_on_demand_rate')
-        }
-
-        entries = AWSCostEntryLineItem.objects\
-            .values(*included_fields)\
-            .annotate(**annotations)
-        for entry in entries:
-            daily = AWSCostEntryLineItemDaily(**entry)
-            daily.save()
+        self.aws_info.add_data_to_tenant()
 
     def remove_data_from_tenant(self):
         """Remove the added data."""
         super().remove_data_from_tenant()
-        with tenant_context(self.tenant):
-            for table in (AWSAccountAlias,
-                          AWSCostEntryLineItemDaily,
-                          AWSCostEntryLineItem,
-                          OCPAWSCostLineItemDailySummary,
-                          Provider):
-                table.objects.all().delete()
+        self.aws_info.remove_data_from_tenant()
 
     def _generate_tags(self):
         """Create tags for output data."""
