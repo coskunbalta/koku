@@ -22,7 +22,6 @@ from django.db.models import (F, Value, Window)
 from django.db.models.functions import Coalesce, Concat, RowNumber
 from tenant_schemas.utils import tenant_context
 
-from api.query_filter import QueryFilter
 from api.report.azure.provider_map import AzureProviderMap
 from api.report.queries import ReportQueryHandler
 
@@ -71,7 +70,7 @@ class AzureReportQueryHandler(ReportQueryHandler):
         """
         # units_fallback = self._mapper.report_type_map.get('cost_units_fallback')
         annotations = {
-            'date': self.date_trunc('usage_date_time'),
+            'date': self.date_trunc('usage_start'),
             # 'cost_units': Coalesce(self._mapper.cost_units_key, Value(units_fallback))
         }
         # if self._mapper.usage_units_key:
@@ -138,21 +137,6 @@ class AzureReportQueryHandler(ReportQueryHandler):
             query_sum.update(sum_units)
             self._pack_data_object(query_sum, **self._mapper.PACK_DEFINITIONS)
         return query_sum
-
-    def _get_time_based_filters(self, delta=False):
-        if delta:
-            date_delta = self._get_date_delta()
-            start = self.start_datetime - date_delta
-            end = self.end_datetime - date_delta
-        else:
-            start = self.start_datetime
-            end = self.end_datetime
-
-        start_filter = QueryFilter(field='usage_date_time', operation='gte',
-                                   parameter=start)
-        end_filter = QueryFilter(field='usage_date_time', operation='lte',
-                                 parameter=end)
-        return start_filter, end_filter
 
     def execute_query(self):
         """Execute query and return provided data.

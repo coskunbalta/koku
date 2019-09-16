@@ -16,7 +16,6 @@
 #
 """Test the Azure Provider query handler."""
 
-import logging
 import random
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import quote_plus
@@ -35,8 +34,6 @@ from api.utils import DateHelper
 from reporting.models import (AzureCostEntryLineItemDailySummary,
                               AzureCostEntryProductService)
 
-LOG = logging.getLogger(__name__)
-
 
 class AzureReportQueryHandlerTest(IamTestCase):
     """Azure report view test cases."""
@@ -45,11 +42,11 @@ class AzureReportQueryHandlerTest(IamTestCase):
         """Set up the customer view tests."""
         super().setUp()
         self.dh = DateHelper()
-        self.this_month_filter = {'usage_date_time__gte': self.dh.this_month_start}
-        self.ten_day_filter = {'usage_date_time__gte': self.dh.n_days_ago(self.dh.today, 9)}
-        self.thirty_day_filter = {'usage_date_time__gte': self.dh.n_days_ago(self.dh.today, 29)}
-        self.last_month_filter = {'usage_date_time__gte': self.dh.last_month_start,
-                                  'usage_date_time__lte': self.dh.last_month_end}
+        self.this_month_filter = {'usage_start__gte': self.dh.this_month_start}
+        self.ten_day_filter = {'usage_start__gte': self.dh.n_days_ago(self.dh.today, 9)}
+        self.thirty_day_filter = {'usage_start__gte': self.dh.n_days_ago(self.dh.today, 29)}
+        self.last_month_filter = {'usage_start__gte': self.dh.last_month_start,
+                                  'usage_start__lte': self.dh.last_month_end}
         self.generator = AzureReportDataGenerator(self.tenant)
         self.generator.add_data_to_tenant()
 
@@ -771,14 +768,14 @@ class AzureReportQueryHandlerTest(IamTestCase):
             # fetch the expected sums from the DB.
             with tenant_context(self.tenant):
                 curr = AzureCostEntryLineItemDailySummary.objects.filter(
-                    usage_date_time__gte=self.dh.this_month_start,
-                    usage_date_time__lte=self.dh.today,
+                    usage_start__gte=self.dh.this_month_start,
+                    usage_start__lte=self.dh.today,
                     subscription_guid=sub.get('subscription_guid')).aggregate(value=Sum('pretax_cost'))
                 current_total = Decimal(curr.get('value'))
 
                 prev = AzureCostEntryLineItemDailySummary.objects.filter(
-                    usage_date_time__gte=self.dh.last_month_start,
-                    usage_date_time__lte=self.dh.today.replace(month=self.dh.today.month - 1),
+                    usage_start__gte=self.dh.last_month_start,
+                    usage_start__lte=self.dh.today.replace(month=self.dh.today.month - 1),
                     subscription_guid=sub.get('subscription_guid')).aggregate(value=Sum('pretax_cost'))
                 prev_total = Decimal(prev.get('value'))
 
@@ -799,13 +796,13 @@ class AzureReportQueryHandlerTest(IamTestCase):
         # fetch the expected sums from the DB.
         with tenant_context(self.tenant):
             curr = AzureCostEntryLineItemDailySummary.objects.filter(
-                usage_date_time__gte=self.dh.this_month_start,
-                usage_date_time__lte=self.dh.today).aggregate(value=Sum('pretax_cost'))
+                usage_start__gte=self.dh.this_month_start,
+                usage_start__lte=self.dh.today).aggregate(value=Sum('pretax_cost'))
             current_total = Decimal(curr.get('value'))
 
             prev = AzureCostEntryLineItemDailySummary.objects.filter(
-                usage_date_time__gte=self.dh.last_month_start,
-                usage_date_time__lte=self.dh.today.replace(month=self.dh.today.month - 1))\
+                usage_start__gte=self.dh.last_month_start,
+                usage_start__lte=self.dh.today.replace(month=self.dh.today.month - 1))\
                 .aggregate(value=Sum('pretax_cost'))
             prev_total = Decimal(prev.get('value'))
 
@@ -1053,7 +1050,8 @@ class AzureReportQueryHandlerTest(IamTestCase):
                     # self.assertIsInstance(value.get('usage', {}).get('value'), Decimal)
                     # self.assertGreater(value.get('usage', {}).get('value'), Decimal(0))
                     self.assertIsInstance(value.get('usage', {}), Decimal)
-                    self.assertGreater(value.get('usage', {}), Decimal(0))
+                    self.assertGreaterEqual(value.get('usage', {}).quantize(
+                        Decimal('.0001'), ROUND_HALF_UP), Decimal(0))
 
     def test_query_storage_with_totals(self):
         """Test execute_query() - storage with totals.
@@ -1266,7 +1264,7 @@ class AzureReportQueryHandlerTest(IamTestCase):
 
         with tenant_context(self.tenant):
             labels = AzureCostEntryLineItemDailySummary.objects\
-                .filter(usage_date_time__gte=self.dh.this_month_start)\
+                .filter(usage_start__gte=self.dh.this_month_start)\
                 .filter(tags__has_key=filter_key)\
                 .values(*['tags'])\
                 .all()
@@ -1274,7 +1272,7 @@ class AzureReportQueryHandlerTest(IamTestCase):
             filter_value = label_of_interest.get('tags', {}).get(filter_key)
 
             totals = AzureCostEntryLineItemDailySummary.objects\
-                .filter(usage_date_time__gte=self.dh.this_month_start)\
+                .filter(usage_start__gte=self.dh.this_month_start)\
                 .filter(**{f'tags__{filter_key}': filter_value})\
                 .aggregate(**{'cost': Sum('pretax_cost')})
 
@@ -1310,7 +1308,7 @@ class AzureReportQueryHandlerTest(IamTestCase):
 
         with tenant_context(self.tenant):
             totals = AzureCostEntryLineItemDailySummary.objects\
-                .filter(usage_date_time__gte=self.dh.this_month_start)\
+                .filter(usage_start__gte=self.dh.this_month_start)\
                 .filter(**{'tags__has_key': filter_key})\
                 .aggregate(
                     **{'cost': Sum('pretax_cost')})
@@ -1347,7 +1345,7 @@ class AzureReportQueryHandlerTest(IamTestCase):
 
         with tenant_context(self.tenant):
             totals = AzureCostEntryLineItemDailySummary.objects\
-                .filter(usage_date_time__gte=self.dh.this_month_start)\
+                .filter(usage_start__gte=self.dh.this_month_start)\
                 .filter(**{'tags__has_key': group_by_key})\
                 .aggregate(
                     **{'cost': Sum('pretax_cost')})
