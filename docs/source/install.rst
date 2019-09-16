@@ -64,4 +64,4 @@ Masu can alternatively be deployed with Docker Compose:
 Follow the steps above to start the Koku API with Docker Compose
 
 Start masu services: ``masu_branch> make docker-up``
-To trigger masu to process data, send a GET request to http://<baseUrl>:5000/api/cost-management/v1/download/ , you can see masu logs using `docker logs koku_worker -f`
+To trigger masu to process data, send a GET request to http://<baseUrl>:5000/api/cost-management/v1/download/ , you can see logs using `docker logs koku_worker -f`
