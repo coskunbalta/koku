@@ -346,15 +346,17 @@ class OCPReportDBAccessor(ReportDBAccessorBase):
             'masu.database',
             'sql/reporting_ocpinfrastructure_provider_map.sql'
         )
-        infra_sql = infra_sql.decode('utf-8').format(
-            uuid=str(uuid.uuid4()).replace('-', '_'),
-            start_date=start_date,
-            end_date=end_date,
-            schema=self.schema
-        )
+        infra_sql = infra_sql.decode('utf-8')
+        infra_sql_params = {
+            'uuid': str(uuid.uuid4()).replace('-', '_'),
+            'start_date': start_date,
+            'end_date': end_date,
+            'schema': self.schema
+        }
+        infra_sql, infra_sql_params = self.jinja_sql.prepare_query(infra_sql, infra_sql_params)
         with connection.cursor() as cursor:
             cursor.db.set_schema(self.schema)
-            cursor.execute(infra_sql)
+            cursor.execute(infra_sql, list(infra_sql_params))
             results = cursor.fetchall()
 
         db_results = []
