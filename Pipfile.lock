@@ -590,18 +590,19 @@
         },
         "psutil": {
             "hashes": [
-                "sha256:206eb909aa8878101d0eca07f4b31889c748f34ed6820a12eb3168c7aa17478e",
-                "sha256:649f7ffc02114dced8fbd08afcd021af75f5f5b2311bc0e69e53e8f100fe296f",
-                "sha256:6ebf2b9c996bb8c7198b385bade468ac8068ad8b78c54a58ff288cd5f61992c7",
-                "sha256:753c5988edc07da00dafd6d3d279d41f98c62cd4d3a548c4d05741a023b0c2e7",
-                "sha256:76fb0956d6d50e68e3f22e7cc983acf4e243dc0fcc32fd693d398cb21c928802",
-                "sha256:828e1c3ca6756c54ac00f1427fdac8b12e21b8a068c3bb9b631a1734cada25ed",
-                "sha256:a4c62319ec6bf2b3570487dd72d471307ae5495ce3802c1be81b8a22e438b4bc",
-                "sha256:acba1df9da3983ec3c9c963adaaf530fcb4be0cd400a8294f1ecc2db56499ddd",
-                "sha256:ef342cb7d9b60e6100364f50c57fa3a77d02ff8665d5b956746ac01901247ac4"
+                "sha256:0ff1f630ee0df7c048ef53e50196437d2c9cebab8ccca0e3078d9300c4b7da47",
+                "sha256:10175ea15b7e4a1bf1a0863da7e17042862b3ea3e7d24285c96fa4cc65ab9788",
+                "sha256:41d645f100c6b4c995ff342ef7d79a936f3f48e9a816d7d655c69b352460341d",
+                "sha256:43f0d7536a98c20a538242ce2bd8c64dbc1f6c396e97f2bdceb496d7583b9b80",
+                "sha256:4f637dd25d3bce4879d0b4032d13f4120ba18ed2d028e85d911d429f447c251c",
+                "sha256:512e77ac987105e2d7aa2386d9f260434ad8b71e41484f8d84bfecd4ae3764ca",
+                "sha256:512e854d68f8b42f79b2c7864d997b39125baff9bcff00028ce43543867de7c4",
+                "sha256:75d50d1138b2476a11dca33ab1ad2b78707d428418b581966ccedac768358f72",
+                "sha256:f0ec1a3ea56503f4facc1dca364cf3dd66dc39169c4603000d3d34270e05fbb3",
+                "sha256:f6b66a5663700b71bac3d8ecf6533a1550a679823e63b2c92dc4c3c8c244c52e",
+                "sha256:fb58e87c29ec0fb99937b95c5d473bb786d263aaa767d017a6bd4ad52d694e79"
             ],
-            "index": "pypi",
-            "version": "==5.6.2"
+            "version": "==5.6.4"
         },
         "psycopg2": {
             "hashes": [
