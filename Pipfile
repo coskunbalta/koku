@@ -1,10 +1,13 @@
 [[source]]
+
 url = "https://pypi.python.org/simple"
 verify_ssl = true
 name = "pypi"
 
+
 [packages]
-aiokafka = "==0.5.1"
+
+aiokafka = "==0.5.2"
 django-environ = ">=0.4.0"
 djangorestframework = ">=3.8.0"
 gunicorn = ">=19.7.0"
@@ -39,7 +42,9 @@ google-cloud-storage = "~=1.19.1"
 jinjasql = "*"
 pandas = "~=0.25.1"
 
+
 [dev-packages]
+
 astroid = "==2.2.5"
 pylint = "==2.3.1"
 sphinx-rtd-theme = ">=0.3.0"
@@ -57,5 +62,7 @@ tblib = "*"
 coveralls = "*"
 python-coveralls = "*"
 
+
 [requires]
+
 python_version = "3.6"
