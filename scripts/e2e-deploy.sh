@@ -44,7 +44,7 @@
 #   Check the READMEs in the above git repos for installation instructions
 #
 
-set -e
+# set -e
 
 ########## CONFIGURATION ##########
 ########## Change these to suit your needs. ##########
@@ -58,13 +58,29 @@ OCP_PASSWORD=developer
 
 ### config files & dirs
 # see: https://access.redhat.com/terms-based-registry/#/accounts
-REGISTRY_REDHAT_IO_SECRETS=''
+# This parameter is required to not be the empty string
+# You may create a new service account for this.
+# Set this variable to the absolute path of the secrets.yaml file
+# For example:
+# REGISTRY_REDHAT_IO_SECRETS=${HOME}/123456_johnsmith-secret.yaml
+REGISTRY_REDHAT_IO_SECRETS='/Users/nbonilla/Documents/Koku/12705040_PandaVice-secret.yaml'
 
-# location of application secrets
-KOKU_SECRETS=$(dirname $(readlink -f $0))/e2e-secrets.yml
+# absolute path of application secrets
+if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Mac OSX
+        realpath() {
+             [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+        }
+
+        KOKU_SECRETS=$(realpath "$0")/e2e-secrets.yml
+else
+        KOKU_SECRETS=$(dirname $(readlink -f $0))/e2e-secrets.yml
+fi
+
 
 # location of e2e repo clone
-E2E_REPO=''
+# you need to clone the RedHatInsights repo 'e2e-deploy'
+E2E_REPO='/Users/nbonilla/Documents/Koku/e2e-deploy'
 
 # location of application environment vars
 DEPLOY_ENV=${E2E_REPO}/env/dev.yml
@@ -87,6 +103,7 @@ pushd ${E2E_REPO}
 ### validation
 if [ -z "${REGISTRY_REDHAT_IO_SECRETS}" ]; then
     echo 'Please specify a secrets file for registry.redhat.io'
+    echo 'Please set the REGISTRY_REDHAT_IO_SECRETS variable.'
     exit 1
 fi
 
