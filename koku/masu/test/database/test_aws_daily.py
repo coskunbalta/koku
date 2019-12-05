@@ -17,38 +17,65 @@
 
 import datetime
 from datetime import timedelta
+
 import numpy as np
+from tenant_schemas.utils import schema_context
+
 from masu.database import AWS_CUR_TABLE_MAP
-from masu.database.report_db_accessor_base import ReportDBAccessorBase
+from masu.database.aws_report_db_accessor import AWSReportDBAccessor
+from masu.database.report_manifest_db_accessor import ReportManifestDBAccessor
 from masu.database.reporting_common_db_accessor import ReportingCommonDBAccessor
-from tests import MasuTestCase
+from masu.external.date_accessor import DateAccessor
+from masu.test import MasuTestCase
+from masu.test.database.helpers import ReportObjectCreator
 
 
 class AWSDailyTest(MasuTestCase):
     """Test Cases for the AWS Daily and Daily_Summary database tables."""
 
-    # Select schema and open connection with PostgreSQL and SQLAlchemy
-    # Establish connection using PostgreSQL server metadata (PostgreSQL, user, password, host, port, database name)
-    # Initialize cursor and set search path to schema
-    def setUp(self):
-        """Establish the database connection."""
-        self._datetime_format = '%Y-%m-%d %H:%M:%S'
-        self._schema = 'acct10001'
-        self.common_accessor = ReportingCommonDBAccessor()
-        self.column_map = self.common_accessor.column_map
-        self.accessor = ReportDBAccessorBase(
-            self._schema, self.column_map
-        )
-        self.report_schema = self.accessor.report_schema
-        print("Connection is successful!")
+    @classmethod
+    def setUpClass(cls):
+        """Set up the test class with required objects."""
+        super().setUpClass()
+        cls.common_accessor = ReportingCommonDBAccessor()
+        cls.column_map = cls.common_accessor.column_map
+        cls.accessor = AWSReportDBAccessor(schema=cls.schema, column_map=cls.column_map)
+        cls.report_schema = cls.accessor.report_schema
+        cls.creator = ReportObjectCreator(cls.schema, cls.column_map)
+        cls.manifest_accessor = ReportManifestDBAccessor()
 
-    # Close connection with PostgreSQL and SQLAlchemy
+    def setUp(self):
+        """Set up a test with database objects."""
+        super().setUp()
+        today = DateAccessor().today_with_timezone('UTC')
+        billing_start = today.replace(day=1)
+
+        self.cluster_id = 'testcluster'
+
+        self.manifest_dict = {
+            'assembly_id': '1234',
+            'billing_period_start_datetime': billing_start,
+            'num_total_files': 2,
+            'provider_id': self.aws_provider.uuid,
+        }
+
+        bill = self.creator.create_cost_entry_bill(
+            provider_uuid=self.aws_provider.uuid,
+            bill_date=today,
+        )
+        cost_entry = self.creator.create_cost_entry(bill, entry_datetime=today)
+        product = self.creator.create_cost_entry_product()
+        pricing = self.creator.create_cost_entry_pricing()
+        reservation = self.creator.create_cost_entry_reservation()
+        self.creator.create_cost_entry_line_item(
+            bill, cost_entry, product, pricing, reservation
+        )
+        self.manifest = self.manifest_accessor.add(**self.manifest_dict)
+
     def tearDown(self):
-        """Close the DB session connection."""
-        self.common_accessor.close_session()
+        """Close the DB session."""
+        super().tearDown()
         self.accessor.close_connections()
-        self.accessor.close_session()
-        print("Connection is closed")
 
     def get_today_date(self):
         return datetime.datetime.now().replace(microsecond=0, second=0, minute=0)
@@ -62,8 +89,10 @@ class AWSDailyTest(MasuTestCase):
             command = command[:-1] + " WHERE {};".format(str(rows))
         if order_by is not None:
             command = command[:-1] + " ORDER BY {};".format(str(order_by))
-        self.accessor._cursor.execute(command)
-        data = self.accessor._cursor.fetchall()
+        with schema_context(self.schema):
+            with self.accessor._conn.cursor() as cursor:
+                cursor.execute(command)
+                data = cursor.fetchall()
         return data
 
     def get_time_interval(self, table_name):
@@ -85,9 +114,14 @@ class AWSDailyTest(MasuTestCase):
     # AWS resource daily usage/cost data via raw SQL query (psycopg2)
     def get_aws_daily_raw(self, date_val):
         usage_start, usage_end = self.get_datetime(date_val)
-        daily_data = np.array(self.table_select_raw_sql(AWS_CUR_TABLE_MAP['line_item_daily'], "id, product_code, usage_amount, unblended_rate,"
-                                                            "unblended_cost, blended_rate, blended_cost, public_on_demand_cost, public_on_demand_rate",
-                                                "usage_start >= " + usage_start + " AND usage_end <= " + usage_end))
+        daily_data = np.array(
+            self.table_select_raw_sql(
+                AWS_CUR_TABLE_MAP['line_item_daily'],
+                "id, product_code, usage_amount, unblended_rate,"
+                "unblended_cost, blended_rate, blended_cost, public_on_demand_cost, public_on_demand_rate",
+                "usage_start >= " + usage_start + " AND usage_end <= " + usage_end,
+            )
+        )
         values_list = []
         row = 0
         while row < daily_data.shape[0]:
@@ -100,7 +134,7 @@ class AWSDailyTest(MasuTestCase):
                 "blended_rate": daily_data[row][5],
                 "blended_cost": daily_data[row][6],
                 "public_on_demand_cost": daily_data[row][7],
-                "public_on_demand_rate": daily_data[row][8]
+                "public_on_demand_rate": daily_data[row][8],
             }
             values_list.append(values)
             row += 1
@@ -109,10 +143,13 @@ class AWSDailyTest(MasuTestCase):
     # AWS resource daily summary usage/cost data via raw SQL query (psycopg2)
     def get_aws_daily_summary_raw(self, date_val):
         usage_start, usage_end = self.get_datetime(date_val)
-        daily_data = self.table_select_raw_sql(AWS_CUR_TABLE_MAP['line_item_daily_summary'], "id, product_code, resource_count, usage_amount,"
-                                                   "unblended_rate, unblended_cost, blended_rate, blended_cost, public_on_demand_cost,"
-                                                   "public_on_demand_rate",
-                                       "usage_start >= " + usage_start + " AND usage_end <= " + usage_end)
+        daily_data = self.table_select_raw_sql(
+            AWS_CUR_TABLE_MAP['line_item_daily_summary'],
+            "id, product_code, resource_count, usage_amount,"
+            "unblended_rate, unblended_cost, blended_rate, blended_cost, public_on_demand_cost,"
+            "public_on_demand_rate",
+            "usage_start >= " + usage_start + " AND usage_end <= " + usage_end,
+        )
         values = {}
         for row in daily_data:
             values = {
@@ -125,20 +162,18 @@ class AWSDailyTest(MasuTestCase):
                 "blended_rate": row[6],
                 "blended_cost": row[7],
                 "public_on_demand_cost": row[8],
-                "public_on_demand_rate": row[9]
+                "public_on_demand_rate": row[9],
             }
         return values
 
     def table_select(self, table_name, columns):
-        query = self.accessor._get_db_obj_query(
-            table_name, columns)
+        query = self.accessor._get_db_obj_query(table_name, columns)
         return query
 
     # AWS resource daily and daily summary sage/cost data via DB accessor query
     def table_select_by_date(self, table_name, columns, date_val):
         usage_start = self.get_datetime(date_val)
-        query = self.accessor._get_db_obj_query(
-            table_name, columns)
+        query = self.accessor._get_db_obj_query(table_name, columns)
         query_by_date = query.filter_by(usage_start=usage_start)
         return query_by_date
 
@@ -153,28 +188,56 @@ class AWSDailyTest(MasuTestCase):
         # get aws line item fields
         line_items = self.table_select(
             AWS_CUR_TABLE_MAP['line_item'],
-            ["cost_entry_bill_id", "cost_entry_product_id", "cost_entry_pricing_id", "cost_entry_reservation_id",
-             "resource_id", "line_item_type", "usage_account_id", "usage_type", "availability_zone",
-             "tax_type", "product_code", "usage_amount", "unblended_rate", "unblended_cost", "blended_rate",
-             "blended_cost", "public_on_demand_cost", "public_on_demand_rate", "usage_start"])
+            [
+                "cost_entry_bill_id",
+                "cost_entry_product_id",
+                "cost_entry_pricing_id",
+                "cost_entry_reservation_id",
+                "resource_id",
+                "line_item_type",
+                "usage_account_id",
+                "usage_type",
+                "availability_zone",
+                "tax_type",
+                "product_code",
+                "usage_amount",
+                "unblended_rate",
+                "unblended_cost",
+                "blended_rate",
+                "blended_cost",
+                "public_on_demand_cost",
+                "public_on_demand_rate",
+                "usage_start",
+            ],
+        )
 
         if line_items.count() == 0:
             self.fail("AWS line item reporting table is empty")
 
         # initialize list of dictionaries to store each unique line item
-        list_dict = [{"cost_entry_bill_id": line_items[0][0], "cost_entry_product_id": line_items[0][1],
-                      "cost_entry_pricing_id": line_items[0][2],
-                      "cost_entry_reservation_id": line_items[0][3],
-                      "resource_id": line_items[0][4], "line_item_type": line_items[0][5],
-                      "usage_account_id": line_items[0][6],
-                      "usage_type": line_items[0][7], "availability_zone": line_items[0][8],
-                      "tax_type": line_items[0][9], "product_code": line_items[0][10],
-                      "usage_amount": line_items[0][11],
-                      "unblended_rate": line_items[0][12], "unblended_cost": line_items[0][13],
-                      "blended_rate": line_items[0][14],
-                      "blended_cost": line_items[0][15], "public_on_demand_cost": line_items[0][16],
-                      "public_on_demand_rate": line_items[0][17],
-                      "usage_start": line_items[0][18]}]
+        list_dict = [
+            {
+                "cost_entry_bill_id": line_items[0][0],
+                "cost_entry_product_id": line_items[0][1],
+                "cost_entry_pricing_id": line_items[0][2],
+                "cost_entry_reservation_id": line_items[0][3],
+                "resource_id": line_items[0][4],
+                "line_item_type": line_items[0][5],
+                "usage_account_id": line_items[0][6],
+                "usage_type": line_items[0][7],
+                "availability_zone": line_items[0][8],
+                "tax_type": line_items[0][9],
+                "product_code": line_items[0][10],
+                "usage_amount": line_items[0][11],
+                "unblended_rate": line_items[0][12],
+                "unblended_cost": line_items[0][13],
+                "blended_rate": line_items[0][14],
+                "blended_cost": line_items[0][15],
+                "public_on_demand_cost": line_items[0][16],
+                "public_on_demand_rate": line_items[0][17],
+                "usage_start": line_items[0][18],
+            }
+        ]
 
         # counter to keep iterate through length of list_dict
         daily_counter = 0
@@ -191,8 +254,19 @@ class AWSDailyTest(MasuTestCase):
                 # get aws usage daily fields
                 daily_values = self.table_select_by_date(
                     AWS_CUR_TABLE_MAP['line_item_daily'],
-                    ["id", "product_code", "usage_amount", "unblended_rate", "unblended_cost", "blended_rate",
-                     "blended_cost", "public_on_demand_cost", "public_on_demand_rate"], curr_date)
+                    [
+                        "id",
+                        "product_code",
+                        "usage_amount",
+                        "unblended_rate",
+                        "unblended_cost",
+                        "blended_rate",
+                        "blended_cost",
+                        "public_on_demand_cost",
+                        "public_on_demand_rate",
+                    ],
+                    curr_date,
+                )
 
                 if daily_values.count() == 0:
                     self.fail("AWS daily reporting table is empty")
@@ -205,8 +279,12 @@ class AWSDailyTest(MasuTestCase):
                         self.assertEqual(list_dict[daily_counter]["unblended_cost"], daily_values[daily_counter][4])
                         self.assertEqual(list_dict[daily_counter]["blended_rate"], daily_values[daily_counter][5])
                         self.assertEqual(list_dict[daily_counter]["blended_cost"], daily_values[daily_counter][6])
-                        self.assertEqual(list_dict[daily_counter]["public_on_demand_cost"], daily_values[daily_counter][7])
-                        self.assertEqual(list_dict[daily_counter]["public_on_demand_rate"], daily_values[daily_counter][8])
+                        self.assertEqual(
+                            list_dict[daily_counter]["public_on_demand_cost"], daily_values[daily_counter][7]
+                        )
+                        self.assertEqual(
+                            list_dict[daily_counter]["public_on_demand_rate"], daily_values[daily_counter][8]
+                        )
                         daily_counter += 1
                         print("AWS Raw vs Daily tests have passed!")
                     except AssertionError as error:
@@ -218,24 +296,29 @@ class AWSDailyTest(MasuTestCase):
                 print(curr_date)
 
                 # re-initialize list of dictionaries with new line item and repeat while loop
-                list_dict = [{"cost_entry_bill_id": line_items[items_counter][0],
-                              "cost_entry_product_id": line_items[items_counter][1],
-                              "cost_entry_pricing_id": line_items[items_counter][2],
-                              "cost_entry_reservation_id": line_items[items_counter][3],
-                              "resource_id": line_items[items_counter][4],
-                              "line_item_type": line_items[items_counter][5],
-                              "usage_account_id": line_items[items_counter][6],
-                              "usage_type": line_items[items_counter][7],
-                              "availability_zone": line_items[items_counter][8],
-                              "tax_type": line_items[items_counter][9], "product_code": line_items[items_counter][10],
-                              "usage_amount": line_items[items_counter][11],
-                              "unblended_rate": line_items[items_counter][12],
-                              "unblended_cost": line_items[items_counter][13],
-                              "blended_rate": line_items[items_counter][14],
-                              "blended_cost": line_items[items_counter][15],
-                              "public_on_demand_cost": line_items[items_counter][16],
-                              "public_on_demand_rate": line_items[items_counter][17],
-                              "usage_start": line_items[items_counter][18]}]
+                list_dict = [
+                    {
+                        "cost_entry_bill_id": line_items[items_counter][0],
+                        "cost_entry_product_id": line_items[items_counter][1],
+                        "cost_entry_pricing_id": line_items[items_counter][2],
+                        "cost_entry_reservation_id": line_items[items_counter][3],
+                        "resource_id": line_items[items_counter][4],
+                        "line_item_type": line_items[items_counter][5],
+                        "usage_account_id": line_items[items_counter][6],
+                        "usage_type": line_items[items_counter][7],
+                        "availability_zone": line_items[items_counter][8],
+                        "tax_type": line_items[items_counter][9],
+                        "product_code": line_items[items_counter][10],
+                        "usage_amount": line_items[items_counter][11],
+                        "unblended_rate": line_items[items_counter][12],
+                        "unblended_cost": line_items[items_counter][13],
+                        "blended_rate": line_items[items_counter][14],
+                        "blended_cost": line_items[items_counter][15],
+                        "public_on_demand_cost": line_items[items_counter][16],
+                        "public_on_demand_rate": line_items[items_counter][17],
+                        "usage_start": line_items[items_counter][18],
+                    }
+                ]
                 daily_counter = 0
                 items_counter += 1
 
@@ -250,18 +333,20 @@ class AWSDailyTest(MasuTestCase):
                 # iterate through usage_list_dict entries (usually only one line item bc database is sorted by date)
                 while dict_counter < len(list_dict):
                     # check if group by fields match
-                    if (list_dict[dict_counter]["cost_entry_bill_id"] == line_items[items_counter][0] and
-                            list_dict[dict_counter]["cost_entry_product_id"] == line_items[items_counter][1] and
-                            list_dict[dict_counter]["cost_entry_pricing_id"] == line_items[items_counter][2] and
-                            list_dict[dict_counter]["cost_entry_reservation_id"] == line_items[items_counter][3] and
-                            list_dict[dict_counter]["resource_id"] == line_items[items_counter][4] and
-                            list_dict[dict_counter]["line_item_type"] == line_items[items_counter][5] and
-                            list_dict[dict_counter]["usage_account_id"] == line_items[items_counter][6] and
-                            list_dict[dict_counter]["usage_type"] == line_items[items_counter][7] and
-                            list_dict[dict_counter]["availability_zone"] == line_items[items_counter][8] and
-                            list_dict[dict_counter]["tax_type"] == line_items[items_counter][9] and
-                            list_dict[dict_counter]["product_code"] == line_items[items_counter][10] and
-                            list_dict[dict_counter]["usage_start"].date() == line_items[items_counter][18].date()):
+                    if (
+                        list_dict[dict_counter]["cost_entry_bill_id"] == line_items[items_counter][0]
+                        and list_dict[dict_counter]["cost_entry_product_id"] == line_items[items_counter][1]
+                        and list_dict[dict_counter]["cost_entry_pricing_id"] == line_items[items_counter][2]
+                        and list_dict[dict_counter]["cost_entry_reservation_id"] == line_items[items_counter][3]
+                        and list_dict[dict_counter]["resource_id"] == line_items[items_counter][4]
+                        and list_dict[dict_counter]["line_item_type"] == line_items[items_counter][5]
+                        and list_dict[dict_counter]["usage_account_id"] == line_items[items_counter][6]
+                        and list_dict[dict_counter]["usage_type"] == line_items[items_counter][7]
+                        and list_dict[dict_counter]["availability_zone"] == line_items[items_counter][8]
+                        and list_dict[dict_counter]["tax_type"] == line_items[items_counter][9]
+                        and list_dict[dict_counter]["product_code"] == line_items[items_counter][10]
+                        and list_dict[dict_counter]["usage_start"].date() == line_items[items_counter][18].date()
+                    ):
 
                         # sum or max values based on database line item to daily report processing
                         usage_amount = list_dict[dict_counter]["usage_amount"] + line_items[items_counter][11]
@@ -269,17 +354,23 @@ class AWSDailyTest(MasuTestCase):
                         unblended_cost = list_dict[dict_counter]["unblended_cost"] + line_items[items_counter][13]
                         blended_rate = max(list_dict[dict_counter]["blended_rate"], line_items[items_counter][14])
                         blended_cost = list_dict[dict_counter]["blended_cost"] + line_items[items_counter][15]
-                        public_on_demand_cost = list_dict[dict_counter]["public_on_demand_cost"] + \
-                                                line_items[items_counter][16]
-                        public_on_demand_rate = max(list_dict[dict_counter]["public_on_demand_rate"],
-                                                    line_items[items_counter][17])
+                        public_on_demand_cost = (
+                            list_dict[dict_counter]["public_on_demand_cost"] + line_items[items_counter][16]
+                        )
+                        public_on_demand_rate = max(
+                            list_dict[dict_counter]["public_on_demand_rate"], line_items[items_counter][17]
+                        )
 
                         # update the usage_list_dict entry
-                        dic_entry_temp = {"usage_amount": usage_amount, "unblended_rate": unblended_rate,
-                                          "unblended_cost": unblended_cost, "blended_rate": blended_rate,
-                                          "blended_cost": blended_cost,
-                                          "public_on_demand_cost": public_on_demand_cost,
-                                          "public_on_demand_rate": public_on_demand_rate}
+                        dic_entry_temp = {
+                            "usage_amount": usage_amount,
+                            "unblended_rate": unblended_rate,
+                            "unblended_cost": unblended_cost,
+                            "blended_rate": blended_rate,
+                            "blended_cost": blended_cost,
+                            "public_on_demand_cost": public_on_demand_cost,
+                            "public_on_demand_rate": public_on_demand_rate,
+                        }
                         list_dict[dict_counter].update(dic_entry_temp)
                         flag = 1
                         break
@@ -288,38 +379,42 @@ class AWSDailyTest(MasuTestCase):
                 # unusual case: if set of fields did not match any existing entries in dictionaries, then create new
                 # entry within usage_list_dict
                 if flag == 0:
-                    list_dict.append({"cost_entry_bill_id": line_items[items_counter][0],
-                                      "cost_entry_product_id": line_items[items_counter][1],
-                                      "cost_entry_pricing_id": line_items[items_counter][2],
-                                      "cost_entry_reservation_id": line_items[items_counter][3],
-                                      "resource_id": line_items[items_counter][4],
-                                      "line_item_type": line_items[items_counter][5],
-                                      "usage_account_id": line_items[items_counter][6],
-                                      "usage_type": line_items[items_counter][7],
-                                      "availability_zone": line_items[items_counter][8],
-                                      "tax_type": line_items[items_counter][9],
-                                      "product_code": line_items[items_counter][10],
-                                      "usage_amount": line_items[items_counter][11],
-                                      "unblended_rate": line_items[items_counter][12],
-                                      "unblended_cost": line_items[items_counter][13],
-                                      "blended_rate": line_items[items_counter][14],
-                                      "blended_cost": line_items[items_counter][15],
-                                      "public_on_demand_cost": line_items[items_counter][16],
-                                      "public_on_demand_rate": line_items[items_counter][17],
-                                      "usage_start": line_items[items_counter][18]})
+                    list_dict.append(
+                        {
+                            "cost_entry_bill_id": line_items[items_counter][0],
+                            "cost_entry_product_id": line_items[items_counter][1],
+                            "cost_entry_pricing_id": line_items[items_counter][2],
+                            "cost_entry_reservation_id": line_items[items_counter][3],
+                            "resource_id": line_items[items_counter][4],
+                            "line_item_type": line_items[items_counter][5],
+                            "usage_account_id": line_items[items_counter][6],
+                            "usage_type": line_items[items_counter][7],
+                            "availability_zone": line_items[items_counter][8],
+                            "tax_type": line_items[items_counter][9],
+                            "product_code": line_items[items_counter][10],
+                            "usage_amount": line_items[items_counter][11],
+                            "unblended_rate": line_items[items_counter][12],
+                            "unblended_cost": line_items[items_counter][13],
+                            "blended_rate": line_items[items_counter][14],
+                            "blended_cost": line_items[items_counter][15],
+                            "public_on_demand_cost": line_items[items_counter][16],
+                            "public_on_demand_rate": line_items[items_counter][17],
+                            "usage_start": line_items[items_counter][18],
+                        }
+                    )
                 items_counter += 1
 
         print("All Raw vs Daily tests have passed!")
 
     # Assert daily and daily_summary values are correct based on raw SQL queries from PostgreSQL
     def test_daily_to_summary_raw_sql(self):
-        start_interval, end_interval = (self.get_time_interval())
+        start_interval, end_interval = self.get_time_interval(AWS_CUR_TABLE_MAP['line_item_daily'])
         for date_val in self.date_range(start_interval, end_interval):
             print("Date: " + str(date_val))
             daily_values = self.get_aws_daily_raw(date_val)
             daily_summary_values = self.get_aws_daily_summary_raw(date_val)
             num_resources = daily_summary_values["resource_count"]
-            usage_cost_sum, unblended_cost_sum, blended_cost_sum, public_on_demand_cost_sum = 0, 0, 0, 0
+            usage_cost_sum, unblended_cost_sum, blended_cost_sum, public_on_demand_cost_sum = (0, 0, 0, 0)
             unblended_rate_max, blended_rate_max, public_on_demand_rate_max = 0, 0, 0
             counter = 0
             while counter < num_resources:
@@ -351,7 +446,7 @@ class AWSDailyTest(MasuTestCase):
     # Assert daily and daily summary values are correct based on DB accessor queries using SQLAlchemy
     def test_daily_to_summary(self):
         # database test between daily and daily_summary reporting tables
-        start_interval, end_interval = (self.get_time_interval(AWS_CUR_TABLE_MAP['line_item_daily']))
+        start_interval, end_interval = self.get_time_interval(AWS_CUR_TABLE_MAP['line_item_daily'])
         today = self.get_today_date().date()
         if end_interval == today:
             end_interval = today
@@ -359,12 +454,35 @@ class AWSDailyTest(MasuTestCase):
             print("Date: " + str(date_val))
             daily_values = self.table_select_by_date(
                 AWS_CUR_TABLE_MAP['line_item_daily'],
-                ["id", "product_code", "usage_amount", "unblended_rate", "unblended_cost", "blended_rate",
-                 "blended_cost", "public_on_demand_cost", "public_on_demand_rate"], date_val)
+                [
+                    "id",
+                    "product_code",
+                    "usage_amount",
+                    "unblended_rate",
+                    "unblended_cost",
+                    "blended_rate",
+                    "blended_cost",
+                    "public_on_demand_cost",
+                    "public_on_demand_rate",
+                ],
+                date_val,
+            )
             daily_summary_values = self.table_select_by_date(
                 AWS_CUR_TABLE_MAP['line_item_daily_summary'],
-                ["id", "product_code", "resource_count", "usage_amount", "unblended_rate", "unblended_cost",
-                 "blended_rate", "blended_cost", "public_on_demand_cost", "public_on_demand_rate"], date_val)
+                [
+                    "id",
+                    "product_code",
+                    "resource_count",
+                    "usage_amount",
+                    "unblended_rate",
+                    "unblended_cost",
+                    "blended_rate",
+                    "blended_cost",
+                    "public_on_demand_cost",
+                    "public_on_demand_rate",
+                ],
+                date_val,
+            )
             daily_count = daily_values.count()
             if daily_count == 0:
                 self.fail("AWS daily reporting table is empty")
@@ -378,7 +496,7 @@ class AWSDailyTest(MasuTestCase):
                 print(error)
                 self.fail("Daily and daily summary reporting tables do not match")
 
-            usage_cost_sum, unblended_cost_sum, blended_cost_sum, public_on_demand_cost_sum = 0, 0, 0, 0
+            usage_cost_sum, unblended_cost_sum, blended_cost_sum, public_on_demand_cost_sum = (0, 0, 0, 0)
             unblended_rate_max, blended_rate_max, public_on_demand_rate_max = 0, 0, 0
             counter = 0
             while counter < daily_count:
@@ -411,9 +529,9 @@ class AWSDailyTest(MasuTestCase):
         print("All AWS reporting database tests have passed!")
 
 
-# test script
-psql = AWSDailyTest()
-psql.setUp()
-psql.test_line_item_to_daily()
-psql.test_daily_to_summary()
-psql.tearDown()
+# # test script
+# psql = AWSDailyTest()
+# psql.setUp()
+# psql.test_line_item_to_daily()
+# psql.test_daily_to_summary()
+# psql.tearDown()
