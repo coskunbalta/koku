@@ -169,7 +169,7 @@ class ProviderViewSet(mixins.CreateModelMixin,
             manager = ProviderManager(provider['uuid'])
             tenant = get_tenant(request.user)
             provider['stats'] = manager.provider_statistics(tenant)
-            provider['infrastructure'] = manager.get_infrastructure_name(tenant)
+            provider['infrastructure'] = manager.get_infrastructure_name()
             provider['cost_models'] = [
                 {'name': model.name, 'uuid': model.uuid}
                 for model in manager.get_cost_models(tenant)
@@ -182,7 +182,7 @@ class ProviderViewSet(mixins.CreateModelMixin,
         response = super().retrieve(request=request, args=args, kwargs=kwargs)
         tenant = get_tenant(request.user)
         manager = ProviderManager(kwargs['uuid'])
-        response.data['infrastructure'] = manager.get_infrastructure_name(tenant)
+        response.data['infrastructure'] = manager.get_infrastructure_name()
         response.data['stats'] = manager.provider_statistics(tenant)
         response.data['cost_models'] = [
             {'name': model.name, 'uuid': model.uuid}
